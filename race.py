@@ -1,62 +1,20 @@
 import math
+from math import cos, sin
 import numpy as np
 from plot import plot, plot_trajectory, plot_covariance_2d
 
-class UserCode:
-    def __init__(self):
-        pass
-        
-    def get_markers(self):
-        '''
-        place up to 30 markers in the world
-        '''
-        markers = [
-             [0, 0], # marker at world position x = 0, y = 0
-             [2, 0]  # marker at world position x = 2, y = 0
-        ]
-        
-        #TODO: Add your markers where needed
-       
-        return markers
-        
-    def state_callback(self, t, dt, linear_velocity, yaw_velocity):
-        '''
-        called when a new odometry measurement arrives approx. 200Hz
-    
-        :param t - simulation time
-        :param dt - time difference this last invocation
-        :param linear_velocity - x and y velocity in local quadrotor coordinate frame (independet of roll and pitch)
-        :param yaw_velocity - velocity around quadrotor z axis (independet of roll and pitch)
 
-        :return tuple containing linear x and y velocity control commands in local quadrotor coordinate frame (independet of roll and pitch), and yaw velocity
-        '''
-        
-        return np.ones((2,1)) * 0.1, 0
-
-
-    def measurement_callback(self, marker_position_world, marker_yaw_world, marker_position_relative, marker_yaw_relative):
-        '''
-        called when a new marker measurement arrives max 30Hz, marker measurements are only available if the quadrotor is
-        sufficiently close to a marker
-            
-        :param marker_position_world - x and y position of the marker in world coordinates 2x1 vector
-        :param marker_yaw_world - orientation of the marker in world coordinates
-        :param marker_position_relative - x and y position of the marker relative to the quadrotor 2x1 vector
-        :param marker_yaw_relative - orientation of the marker relative to the quadrotor
-        '''
-        pass
-    
-
-
-
-import math
-import numpy as np
-from plot import plot_trajectory, plot_point, plot_covariance_2d
 
 class UserCode:
     def __init__(self):
-        #TODO: Play with the noise matrices
+        #PID parameters
+        Kp_xy = 2
+        Kp_z = 1
+        Kd_xy = 1
+        Kd_z = 0
 
+        self.Kp = np.array([[Kp_xy, Kp_xy, Kp_z]]).T
+        self.Kd = np.array([[Kd_xy, Kd_xy, Kd_z]]).T
         #process noise
         pos_noise_std = 0.005
         yaw_noise_std = 0.005
@@ -77,9 +35,94 @@ class UserCode:
 
         # state vector [x, y, yaw] in world coordinates
         self.x = np.zeros((3,1))
+        self.x_desired = np.array([0,0,1])
+        self.velocity = np.zeros((3,1))
 
         # 3x3 state covariance matrix
         self.sigma = 0.01 * np.identity(3)
+        
+    def get_markers(self):
+        '''
+        place up to 30 markers in the world
+        '''
+        markers = [
+             [-1, -1],
+             [-1,0],
+             [1,0],
+             [0,1],
+             [0,-1],
+             [-1,1],
+             [1,-1],
+             [0, 0], # marker at world position x = 0, y = 0
+             [2, 0],  # marker at world position x = 2, y = 0
+             [1, 1],
+             [2, 2],
+             [3, 3],
+             [4, 4],
+             [5, 5]
+        ]
+        
+        #TODO: Add your markers where needed
+       
+        return markers
+        
+    def state_callback(self, t, dt, linear_velocity, yaw_velocity):
+        '''
+        called when a new odometry measurement arrives approx. 200Hz
+    
+        :param t - simulation time
+        :param dt - time difference this last invocation
+        :param linear_velocity - x and y velocity in local quadrotor coordinate frame (independet of roll and pitch)
+        :param yaw_velocity - velocity around quadrotor z axis (independet of roll and pitch)
+
+        :return tuple containing linear x and y velocity control commands in local quadrotor coordinate frame (independet of roll and pitch), and yaw velocity
+        '''
+        self.x = self.predictState(dt, self.x, linear_velocity, yaw_velocity)
+
+        F = self.calculatePredictStateJacobian(dt, self.x, linear_velocity, yaw_velocity)
+        self.sigma = self.predictCovariance(self.sigma, F, self.Q);
+        self.velocity = self.velocity_inversion(linear_velocity,yaw_velocity)
+        print [int(x) for x in self.x]
+        return self.compute_control_command(),0.
+    def velocity_inversion(self,linear_velocity,yaw_velocity):
+        '''
+        called to invert a local world velocity to an absolute world velocity
+        :param linear_velocity - x,y velocity in local world
+        :param yaw_velocity - turning velocity in local world
+        :return 3-d velocity in absolute coordinates:
+        '''
+        rotation = self.rotation(self.x[2])
+        #invRotation = np.linalg.inv(rotation)
+        velocity = np.dot(rotation,linear_velocity)
+        velocity = np.concatenate((velocity,np.zeros(1)))
+        return velocity
+
+
+    def measurement_callback(self, marker_position_world, marker_yaw_world, marker_position_relative, marker_yaw_relative):
+        '''
+        called when a new marker measurement arrives max 30Hz, marker measurements are only available if the quadrotor is
+        sufficiently close to a marker
+            
+        :param marker_position_world - x and y position of the marker in world coordinates 2x1 vector
+        :param marker_yaw_world - orientation of the marker in world coordinates
+        :param marker_position_relative - x and y position of the marker relative to the quadrotor 2x1 vector
+        :param marker_yaw_relative - orientation of the marker relative to the quadrotor
+        '''
+        z = np.array([[marker_position_relative[0], marker_position_relative[1], marker_yaw_relative]]).T
+        z_predicted = self.predictMeasurement(self.x, marker_position_world, marker_yaw_world)
+
+        H = self.calculatePredictMeasurementJacobian(self.x, marker_position_world, marker_yaw_world)
+        K = self.calculateKalmanGain(self.sigma, H, self.R)
+
+        self.x = self.correctState(K, self.x, z, z_predicted)
+        self.sigma = self.correctCovariance(self.sigma, K, H)
+
+    def compute_control_command(self):
+        #I've set the desired velocity to 0. Optimally the desired velocity should be pointing towards the next marker
+        p = self.Kp * (self.x_desired - self.x)
+        d = self.Kd * (np.zeros((3,1)) - self.velocity)
+        u =  p + d
+        return u[:1]
 
     def rotation(self, yaw):
         '''
@@ -159,10 +202,10 @@ class UserCode:
         :param z_predicted - predicted measurement 3x1 vector
         :return corrected state as 3x1 vector
         '''
+        residual = (z - z_predicted)
+        residual[2] = self.normalizeYaw(residual[2])
 
-        # TODO: implement correction of predicted state x_predicted
-
-        return x_predicted
+        return x_predicted + np.dot(K, residual)
 
     def correctCovariance(self, sigma_p, K, H):
         '''
@@ -188,47 +231,17 @@ class UserCode:
         :param marker_yaw_world - orientation of the marker in world coordinates
         :return - 3x3 Jacobian matrix of the predictMeasurement(...) function
         '''
+        s_yaw = math.sin(x[2])
+        c_yaw = math.cos(x[2])
 
-        # TODO: implement computation of H
+        dx = marker_position_world[0] - x[0];
+        dy = marker_position_world[1] - x[1];
 
-        return np.zeros((3,3))
-
-    def state_callback(self, t, dt, linear_velocity, yaw_velocity):
-        '''
-        called when a new odometry measurement arrives approx. 200Hz
-
-        :param t - simulation time
-        :param dt - time difference this last invocation
-        :param linear_velocity - x and y velocity in local quadrotor coordinate frame (independet of roll and pitch)
-        :param yaw_velocity - velocity around quadrotor z axis (independet of roll and pitch)
-        '''
-        self.x = self.predictState(dt, self.x, linear_velocity, yaw_velocity)
-
-        F = self.calculatePredictStateJacobian(dt, self.x, linear_velocity, yaw_velocity)
-        self.sigma = self.predictCovariance(self.sigma, F, self.Q);
-
-        self.visualizeState()
-
-    def measurement_callback(self, marker_position_world, marker_yaw_world, marker_position_relative, marker_yaw_relative):
-        '''
-        called when a new marker measurement arrives max 30Hz, marker measurements are only available if the quadrotor is
-        sufficiently close to a marker
-
-        :param marker_position_world - x and y position of the marker in world coordinates 2x1 vector
-        :param marker_yaw_world - orientation of the marker in world coordinates
-        :param marker_position_relative - x and y position of the marker relative to the quadrotor 2x1 vector
-        :param marker_yaw_relative - orientation of the marker relative to the quadrotor
-        '''
-        z = np.array([[marker_position_relative[0], marker_position_relative[1], marker_yaw_relative]]).T
-        z_predicted = self.predictMeasurement(self.x, marker_position_world, marker_yaw_world)
-
-        H = self.calculatePredictMeasurementJacobian(self.x, marker_position_world, marker_yaw_world)
-        K = self.calculateKalmanGain(self.sigma, H, self.R)
-
-        self.x = self.correctState(K, self.x, z, z_predicted)
-        self.sigma = self.correctCovariance(self.sigma, K, H)
-
-        self.visualizeState()
+        return np.array([
+            [-c_yaw, -s_yaw, -s_yaw * dx + c_yaw * dy],
+            [ s_yaw, -c_yaw, -c_yaw * dx - s_yaw * dy],
+            [     0,      0,                      -1]])
+    
 
 class Pose2D:
     def __init__(self, rotation, translation):
@@ -262,4 +275,8 @@ class Pose2D:
         '''
         return Pose2D(np.dot(self.rotation, other.rotation), np.dot(self.rotation, other.translation) + self.translation)
 
+class State:
+    def __init__(self):
+        self.position = np.zeros((3,1))
+        self.velocity = np.zeros((3,1))
 
