@@ -35,28 +35,28 @@ class UserCode:
         self.delta = 0.05 #margin of error where two points are equal
         self.origin = np.array([0.,0.,0.])
         self.beacon_list = [
-             [1.5 , 0.5 , 1.],
-             [3.  , 0.5 , 1.],
-             [4.5 , 0.5 , 1.],
-             [3.5 , 2.  , 1.],
-             [1.5 , 3.5 , 1.],
-             [3.  , 3.5 , 1.],
-             [4.5 , 3.5 , 1.],
+             [1.5 , 0.5 , 0.],
+             [3.  , 0.5 , 0.],
+             [4.5 , 0.5 , 0.],
+             [3.5 , 2.  , 0.],
+             [1.5 , 3.5 , 0.],
+             [3.  , 3.5 , 0.],
+             [4.5 , 3.5 , 0.],
 
 
-             [4.0 , 5.5 , 1.],
-             [5.5 , 5.5 , 1.],
-             [7.0 , 5.5 , 1.],
-             [4.0 , 7.0 , 1.],
-             [4.0 , 8.5 , 1.],
-             [5.5 , 8.5 , 1.],
-             [7.0 , 8.5 , 1.],
+             [4.0 , 5.5 , 0.],
+             [5.5 , 5.5 , 0.],
+             [7.0 , 5.5 , 0.],
+             [4.0 , 7.0 , 0.],
+             [4.0 , 8.5 , 0.],
+             [5.5 , 8.5 , 0.],
+             [7.0 , 8.5 , 0.],
 
-             [6.5 , 11. , 1.],
-             [8.0 , 11. , 1.],
-             [9.5 , 11. , 1.],
-             [9.5 , 12.5, 1.],
-             [9.5 , 9.5 , 1.]
+             [6.5 , 11. , 0.],
+             [8.0 , 11. , 0.],
+             [9.5 , 11. , 0.],
+             [9.5 , 12.5, 0.],
+             [9.5 , 9.5 , 0.]
             ]
         self.traveling_salesman()
         self.state_desired = State(np.array(self.path[0]))
@@ -77,6 +77,7 @@ class UserCode:
     def state_callback(self, t, dt, linear_velocity, yaw_velocity):
         '''
         called when a new odometry measurement arrives approx. 200Hz
+        Uses dead reckoning to predict the next state using the current position and velocity
     
         :param t - simulation time
         :param dt - time difference this last invocation
@@ -85,9 +86,12 @@ class UserCode:
 
         :return tuple containing linear x and y velocity control commands in local quadrotor coordinate frame (independet of roll and pitch), and yaw velocity
         '''
-        
-        return self.compute_control_command()[:1], 0. #Only given x,y commands and ignoring yaw control
+        x_p = np.zeros((3, 1))
+        x_p[0:2] = x[0:2] + dt * np.dot(self.rotation(x[2]), u_linear_velocity)
+        x_p[2]   = x[2]   + dt * u_yaw_velocity
 
+        self.checkPath()
+        return self.compute_control_command()
 
     def measurement_callback(self, marker_position_world, marker_yaw_world, marker_position_relative, marker_yaw_relative):
         '''
@@ -99,10 +103,8 @@ class UserCode:
         :param marker_position_relative - x and y position of the marker relative to the quadrotor 2x1 vector
         :param marker_yaw_relative - orientation of the marker relative to the quadrotor
         '''
-        x = None
+        pass
 
-        self.x = x
-        self.checkPath()
 
 
     def compute_control_command(self):
@@ -125,7 +127,7 @@ class UserCode:
         '''
         x = self.state.position
         x_desired = self.state_desired.position
-        distance = lambda x1,x2: sqrt((x1[0]-x2[0])**2 + (x1[1]-x2[1])**2 + (x1[2]-x2[2])**2)
+        distance = lambda x1,x2: sqrt((x1[0]-x2[0])**2 + (x1[1]-x2[1])**2)
 
         if distance(x,x_desired)<= self.delta: #if the two points are sufficiently close, they are equal
             self.path.pop(0) #removes the first coordinate and the next one is the new destination
@@ -143,7 +145,7 @@ class UserCode:
         #Finds the closests point to the origin and then finds the closest point to that one and so on..
         while self.beacon_list <> []:
             print '.',
-            distance = lambda x: sqrt((x[0]-origin_point[0])**2 + (x[1]-origin_point[1])**2 + (x[2]-origin_point[2])**2)
+            distance = lambda x: sqrt((x[0]-origin_point[0])**2 + (x[1]-origin_point[1])**2 )
             next_point = min(self.beacon_list, key=distance)
             next_point_index = self.beacon_list.index(next_point)
             self.beacon_list.pop(next_point_index)
