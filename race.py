@@ -143,6 +143,10 @@ class UserCode:
         self.checkPath()
 
         self.state.position = x_p #not sure if I should update state before I check path. Ie. is the dead reckoning a current or future estimate?
+        self.state.velocity[0] = linear_velocity[0]
+        self.state.velocity[1] = linear_velocity[1]
+        self.state.velocity[2] = yaw_velocity
+
         u = self.compute_control_command()
         return (u[0],u[1]),u[2]
 
@@ -290,9 +294,12 @@ class UserCode:
         '''
         x = self.state.position
         x_desired = self.state_desired.position
+        velocity = self.state.velocity
+        velocity = (velocity[0],velocity[1],velocity[2])
+
         distance = lambda x1,x2: sqrt((x1[0]-x2[0])**2 + (x1[1]-x2[1])**2)
 
-        if distance(x,x_desired)<= self.delta: #if the two points are sufficiently close, they are equal
+        if distance(x,x_desired)<= self.delta and sqrt(sum([v**2 for v in velocity]))<= self.delta: #if the two points are sufficiently close, they are equal
             self.path.pop(0) #removes the first coordinate and the next one is the new destination
             self.state_desired = State(np.array(self.path[0]))
     
