@@ -1,6 +1,24 @@
 import math
 import numpy as np
 from plot import plot, plot_trajectory, plot_covariance_2d
+'''
+###Enter Coordinates######
+          ^
+          |
+###Global Path Planning###
+   ^                   |
+   |                   v
+Localization##Local path planning
+   ^                   |
+   |                   v
+Sensor Interface#PD controller
+   ^                   |
+   |                   v
+Robot hardware (SW on server)
+
+
+'''
+
 
 class UserCode:
     def __init__(self):
