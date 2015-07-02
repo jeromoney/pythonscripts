@@ -22,6 +22,28 @@ Robot hardware (SW on server)
 
 class UserCode:
     def __init__(self):
+        #process noise
+        pos_noise_std = 0.005
+        yaw_noise_std = 0.005
+        self.Q = np.array([
+            [pos_noise_std*pos_noise_std,0,0],
+            [0,pos_noise_std*pos_noise_std,0],
+            [0,0,yaw_noise_std*yaw_noise_std]
+        ])
+
+        #measurement noise
+        z_pos_noise_std = 0.005
+        z_yaw_noise_std = 0.03
+        self.R = np.array([
+            [z_pos_noise_std*z_pos_noise_std,0,0],
+            [0,z_pos_noise_std*z_pos_noise_std,0],
+            [0,0,z_yaw_noise_std*z_yaw_noise_std]
+        ])
+
+        # 3x3 state covariance matrix
+        self.sigma = 0.01 * np.identity(3)
+
+        #PD settings
         Kp_xy = 2
         Kp_z = 1
         Kd_xy = 1
@@ -87,10 +109,15 @@ class UserCode:
         :return tuple containing linear x and y velocity control commands in local quadrotor coordinate frame (independet of roll and pitch), and yaw velocity
         '''
         x_p = np.zeros((3, 1))
-        x_p[0:2] = x[0:2] + dt * np.dot(self.rotation(x[2]), u_linear_velocity)
-        x_p[2]   = x[2]   + dt * u_yaw_velocity
+        x_p[0:2] = x[0:2] + dt * np.dot(self.rotation(x[2]), linear_velocity) #need to rotate local linear velocity to world
+        x_p[2]   = x[2]   + dt * yaw_velocity #yaw_velocity is identical in world and local states
+        F = self.calculatePredictStateJacobian(dt, x_p, linear_velocity)
+        self.sigma = self.predictCovariance(self.sigma, F, self.Q)
+
 
         self.checkPath()
+
+        self.state.position = x_p #not sure if I should update state before I check path. Ie. is the dead reckoning a current or future estimate?
         return self.compute_control_command()
 
     def measurement_callback(self, marker_position_world, marker_yaw_world, marker_position_relative, marker_yaw_relative):
@@ -106,6 +133,40 @@ class UserCode:
         pass
 
 
+    def rotation(self, yaw):
+        '''
+        create 2D rotation matrix from given angle
+        '''
+        s_yaw = sin(yaw)
+        c_yaw = cos(yaw)
+
+        return np.array([
+            [c_yaw, -s_yaw],
+            [s_yaw,  c_yaw]
+        ])
+
+    def calculatePredictStateJacobian(self, dt, x, u_linear_velocity):
+        '''
+        calculates the 3x3 Jacobian matrix for the predictState(...) function
+        '''
+        s_yaw = sin(x[2])
+        c_yaw = cos(x[2])
+
+        dRotation_dYaw = np.array([
+            [-s_yaw, -c_yaw],
+            [ c_yaw, -s_yaw]
+        ])
+        F = np.identity(3)
+        F[0:2, 2] = dt * np.dot(dRotation_dYaw, u_linear_velocity)
+
+        return F
+
+    def predictCovariance(self, sigma, F, Q):
+        '''
+        predicts the next state covariance given the current covariance,
+        the Jacobian of the predictState(...) function F and the process noise Q
+        '''
+        return np.dot(F, np.dot(sigma, F.T)) + Q
 
     def compute_control_command(self):
         '''
