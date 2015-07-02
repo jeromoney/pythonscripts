@@ -1,3 +1,4 @@
+import math
 from math import cos, sin,sqrt
 import numpy as np
 #from plot import plot, plot_trajectory, plot_covariance_2d
@@ -8,7 +9,7 @@ import numpy as np
 ###Find traveling salesman problem with greedy search [x]###
    ^                   |
    |                   v
-Kalman filter##Method to localize along path and return next destination[x]
+Kalman filter[x]##Method to localize along path and return next destination[x]
    ^                   |
    |                   v
 Sensor Interface#PD controller [x]
@@ -89,7 +90,30 @@ class UserCode:
         '''
         markers = [
              [0, 0], # marker at world position x = 0, y = 0
-             [2, 0]  # marker at world position x = 2, y = 0
+             [2, 0],  # marker at world position x = 2, y = 0
+
+             [1.5 , 0.5 ],
+             [3.  , 0.5 ],
+             [4.5 , 0.5 ],
+             [3.5 , 2.  ],
+             [1.5 , 3.5 ],
+             [3.  , 3.5 ],
+             [4.5 , 3.5 ],
+
+
+             [4.0 , 5.5 ],
+             [5.5 , 5.5 ],
+             [7.0 , 5.5 ],
+             [4.0 , 7.0 ],
+             [4.0 , 8.5 ],
+             [5.5 , 8.5 ],
+             [7.0 , 8.5 ],
+
+             [6.5 , 11. ],
+             [8.0 , 11. ],
+             [9.5 , 11. ],
+             [9.5 , 12.5],
+             [9.5 , 9.5 ]
         ]
         
         #TODO: Add your markers where needed
@@ -108,6 +132,7 @@ class UserCode:
 
         :return tuple containing linear x and y velocity control commands in local quadrotor coordinate frame (independet of roll and pitch), and yaw velocity
         '''
+        x = self.state.position
         x_p = np.zeros((3, 1))
         x_p[0:2] = x[0:2] + dt * np.dot(self.rotation(x[2]), linear_velocity) #need to rotate local linear velocity to world
         x_p[2]   = x[2]   + dt * yaw_velocity #yaw_velocity is identical in world and local states
@@ -118,7 +143,9 @@ class UserCode:
         self.checkPath()
 
         self.state.position = x_p #not sure if I should update state before I check path. Ie. is the dead reckoning a current or future estimate?
-        return self.compute_control_command()
+        u = self.compute_control_command()
+        return (u[0],u[1]),u[2]
+
 
     def measurement_callback(self, marker_position_world, marker_yaw_world, marker_position_relative, marker_yaw_relative):
         '''
@@ -130,8 +157,82 @@ class UserCode:
         :param marker_position_relative - x and y position of the marker relative to the quadrotor 2x1 vector
         :param marker_yaw_relative - orientation of the marker relative to the quadrotor
         '''
-        pass
+        z = np.array([[marker_position_relative[0], marker_position_relative[1], marker_yaw_relative]]).T
+        x = self.state.position
+        z_predicted = self.predictMeasurement(x, marker_position_world, marker_yaw_world)
 
+        H = self.calculatePredictMeasurementJacobian(x, marker_position_world, marker_yaw_world)
+        K = self.calculateKalmanGain(self.sigma, H, self.R)
+
+        self.state.position = self.correctState(K, x, z, z_predicted)
+        self.sigma = self.correctCovariance(self.sigma, K, H)
+
+    def calculateKalmanGain(self, sigma_p, H, R):
+        '''
+        calculates the Kalman gain
+        '''
+        return np.dot(np.dot(sigma_p, H.T), np.linalg.inv(np.dot(H, np.dot(sigma_p, H.T)) + R))
+
+    def correctCovariance(self, sigma_p, K, H):
+        '''
+        corrects the sate covariance matrix using Kalman gain and the Jacobian matrix of the predictMeasurement(...) function
+        '''
+        return np.dot(np.identity(3) - np.dot(K, H), sigma_p)
+
+    def normalizeYaw(self, y):
+        '''
+        normalizes the given angle to the interval [-pi, +pi]
+        '''
+        while(y > math.pi):
+            y -= 2 * math.pi
+        while(y < -math.pi):
+            y += 2 * math.pi
+        return y
+
+    def correctState(self, K, x_predicted, z, z_predicted):
+        '''
+        corrects the current state prediction using Kalman gain, the measurement and the predicted measurement
+
+        :param K - Kalman gain
+        :param x_predicted - predicted state 3x1 vector
+        :param z - measurement 3x1 vector
+        :param z_predicted - predicted measurement 3x1 vector
+        :return corrected state as 3x1 vector
+        '''
+        residual = (z - z_predicted)
+        residual[2] = self.normalizeYaw(residual[2])
+
+        return x_predicted + np.dot(K, residual)
+
+    def calculatePredictMeasurementJacobian(self, x, marker_position_world, marker_yaw_world):
+        '''
+        calculates the 3x3 Jacobian matrix of the predictMeasurement(...) function using the current state and
+        the marker position and orientation in world coordinates
+
+        :param x - current state 3x1 vector
+        :param marker_position_world - x and y position of the marker in world coordinates 2x1 vector
+        :param marker_yaw_world - orientation of the marker in world coordinates
+        :return - 3x3 Jacobian matrix of the predictMeasurement(...) function
+        '''
+        s_yaw = math.sin(x[2])
+        c_yaw = math.cos(x[2])
+
+        dx = marker_position_world[0] - x[0];
+        dy = marker_position_world[1] - x[1];
+
+        return np.array([
+            [-c_yaw, -s_yaw, -s_yaw * dx + c_yaw * dy],
+            [ s_yaw, -c_yaw, -c_yaw * dx - s_yaw * dy],
+            [     0,      0,                      -1]
+        ])
+
+    def predictMeasurement(self, x, marker_position_world, marker_yaw_world):
+        '''
+        predicts a marker measurement given the current state and the marker position and orientation in world coordinates
+        '''
+        z_predicted = Pose2D(self.rotation(x[2]), x[0:2]).inv() * Pose2D(self.rotation(marker_yaw_world), marker_position_world);
+
+        return np.array([[z_predicted.translation[0], z_predicted.translation[1], z_predicted.yaw()]]).T
 
     def rotation(self, yaw):
         '''
@@ -178,6 +279,7 @@ class UserCode:
         state = self.state
         state_desired = self.state_desired
         u = self.Kp * (state_desired.position - state.position) + self.Kd * (state_desired.velocity - state.velocity)
+        return u
 
     def checkPath(self):
         '''
@@ -202,19 +304,14 @@ class UserCode:
         '''
         self.path = []
         origin_point = self.origin
-        print 'Finding fast path',
         #Finds the closests point to the origin and then finds the closest point to that one and so on..
         while self.beacon_list <> []:
-            print '.',
             distance = lambda x: sqrt((x[0]-origin_point[0])**2 + (x[1]-origin_point[1])**2 )
             next_point = min(self.beacon_list, key=distance)
             next_point_index = self.beacon_list.index(next_point)
             self.beacon_list.pop(next_point_index)
             self.path.append(next_point)
             origin_point = next_point
-        print ''
-        for beacon in self.path:
-            print beacon
 
 
 class State:
@@ -223,5 +320,34 @@ class State:
         self.velocity = np.zeros((3,1))
 
 
-if __name__ == '__main__':
-    a = UserCode()
+class Pose2D:
+    def __init__(self, rotation, translation):
+        self.rotation = rotation
+        self.translation = translation
+
+    def inv(self):
+        '''
+        inversion of this Pose2D object
+
+        :return - inverse of self
+        '''
+        inv_rotation = self.rotation.transpose()
+        inv_translation = -np.dot(inv_rotation, self.translation)
+
+        return Pose2D(inv_rotation, inv_translation)
+
+    def yaw(self):
+        from math import atan2
+        return atan2(self.rotation[1,0], self.rotation[0,0])
+
+    def __mul__(self, other):
+        '''
+        multiplication of two Pose2D objects, e.g.:
+            a = Pose2D(...) # = self
+            b = Pose2D(...) # = other
+            c = a * b       # = return value
+
+        :param other - Pose2D right hand side
+        :return - product of self and other
+        '''
+        return Pose2D(np.dot(self.rotation, other.rotation), np.dot(self.rotation, other.translation) + self.translation)
