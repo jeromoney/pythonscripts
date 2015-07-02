@@ -1,14 +1,14 @@
-import math
+from math import cos, sin,sqrt
 import numpy as np
-from plot import plot, plot_trajectory, plot_covariance_2d
+#from plot import plot, plot_trajectory, plot_covariance_2d
 '''
 ###Enter Coordinates######
           ^
           |
-###Global Path Planning###
+###Find traveling salesman problem with greedy search [x]###
    ^                   |
    |                   v
-Localization##Local path planning
+Kalman filter##Method to localize along path and return next destination
    ^                   |
    |                   v
 Sensor Interface#PD controller
@@ -22,7 +22,9 @@ Robot hardware (SW on server)
 
 class UserCode:
     def __init__(self):
-        pass
+        self.origin = np.array([0.,0.,0.])
+        self.beacon_list = [(1,1,1),(3,4,1),(10,10,10)]
+        self.traveling_salesman()
         
     def get_markers(self):
         '''
@@ -64,3 +66,26 @@ class UserCode:
         '''
         pass
     
+    def traveling_salesman(self):
+        '''
+        :param self.origin
+        :param self.beacon_list - unsorted list of coordinates that need to be passed through
+        :return self.path - greedy search for a fast path through beacons:
+        '''
+        self.path = []
+        origin_point = self.origin
+
+        #Finds the closests point to the origin and then finds the closest point to that one and so on..
+        while self.beacon_list <> []:
+            distance = lambda x: sqrt((x[0]-origin_point[0])**2 + (x[1]-origin_point[1])**2 + (x[2]-origin_point[2])**2)
+            next_point = min(self.beacon_list, key=distance)
+            next_point_index = self.beacon_list.index(next_point)
+            self.beacon_list.pop(next_point_index)
+            self.path.append(next_point)
+            origin_point = next_point
+
+        for beacon in self.path:
+            print beacon
+
+if __name__ == '__main__':
+    a = UserCode()
