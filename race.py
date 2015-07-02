@@ -2,13 +2,13 @@ from math import cos, sin,sqrt
 import numpy as np
 #from plot import plot, plot_trajectory, plot_covariance_2d
 '''
-###Enter Coordinates######
+###Enter Coordinates [x]######
           ^
           |
 ###Find traveling salesman problem with greedy search [x]###
    ^                   |
    |                   v
-Kalman filter##Method to localize along path and return next destination
+Kalman filter##Method to localize along path and return next destination[x]
    ^                   |
    |                   v
 Sensor Interface#PD controller
@@ -22,6 +22,7 @@ Robot hardware (SW on server)
 
 class UserCode:
     def __init__(self):
+        self.delta = 0.05 #margin of error where two points are equal
         self.origin = np.array([0.,0.,0.])
         self.beacon_list = [
              [1.5 , 0.5 , 1.],
@@ -87,7 +88,22 @@ class UserCode:
         :param marker_position_relative - x and y position of the marker relative to the quadrotor 2x1 vector
         :param marker_yaw_relative - orientation of the marker relative to the quadrotor
         '''
-        pass
+        x = None
+
+        self.x = x
+        self.checkPath()
+
+    def checkPath(self):
+        '''
+        checks if a beacon is close enough that it is considered passed. If so, the next beacon is the new destination
+        :param self.x - position in world coordinates
+        :param self.path - ordered list of coordinates to follow
+        :return None - if the quadrotor is near a coordinate in the list, it is removed:
+        '''
+        distance = lambda x1,x2: sqrt((x1[0]-x2[0])**2 + (x1[1]-x2[1])**2 + (x1[2]-x2[2])**2)
+
+        if distance(self.x,self.path[0])<= self.delta: #if the two points are sufficiently close, they are equal
+            self.path.pop(0) #removes the first coordinate and the next one is the new destination
     
     def traveling_salesman(self):
         '''
@@ -97,16 +113,17 @@ class UserCode:
         '''
         self.path = []
         origin_point = self.origin
-
+        print 'Finding fast path',
         #Finds the closests point to the origin and then finds the closest point to that one and so on..
         while self.beacon_list <> []:
+            print '.',
             distance = lambda x: sqrt((x[0]-origin_point[0])**2 + (x[1]-origin_point[1])**2 + (x[2]-origin_point[2])**2)
             next_point = min(self.beacon_list, key=distance)
             next_point_index = self.beacon_list.index(next_point)
             self.beacon_list.pop(next_point_index)
             self.path.append(next_point)
             origin_point = next_point
-
+        print ''
         for beacon in self.path:
             print beacon
 
