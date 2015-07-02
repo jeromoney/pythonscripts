@@ -11,7 +11,7 @@ import numpy as np
 Kalman filter##Method to localize along path and return next destination[x]
    ^                   |
    |                   v
-Sensor Interface#PD controller
+Sensor Interface#PD controller [x]
    ^                   |
    |                   v
 Robot hardware (SW on server)
@@ -22,6 +22,16 @@ Robot hardware (SW on server)
 
 class UserCode:
     def __init__(self):
+        Kp_xy = 2
+        Kp_z = 1
+        Kd_xy = 1
+        Kd_z = 0
+
+        self.Kp = np.array([[Kp_xy, Kp_xy, Kp_z]]).T
+        self.Kd = np.array([[Kd_xy, Kd_xy, Kd_z]]).T
+
+        self.state = State()
+
         self.delta = 0.05 #margin of error where two points are equal
         self.origin = np.array([0.,0.,0.])
         self.beacon_list = [
@@ -49,6 +59,7 @@ class UserCode:
              [9.5 , 9.5 , 1.]
             ]
         self.traveling_salesman()
+        self.state_desired = State(np.array(self.path[0]))
         
     def get_markers(self):
         '''
@@ -75,7 +86,7 @@ class UserCode:
         :return tuple containing linear x and y velocity control commands in local quadrotor coordinate frame (independet of roll and pitch), and yaw velocity
         '''
         
-        return np.ones((2,1)) * 0.1, 0
+        return self.compute_control_command()[:1], 0. #Only given x,y commands and ignoring yaw control
 
 
     def measurement_callback(self, marker_position_world, marker_yaw_world, marker_position_relative, marker_yaw_relative):
@@ -93,6 +104,18 @@ class UserCode:
         self.x = x
         self.checkPath()
 
+
+    def compute_control_command(self):
+        '''
+        PD controller
+        :param self.state - current location and velocity of quadrotor
+        :param self.state_desired - desired location of quadrotor. Desired velocity is always 0.
+        :return u - control commands:
+        '''
+        state = self.state
+        state_desired = self.state_desired
+        u = self.Kp * (state_desired.position - state.position) + self.Kd * (state_desired.velocity - state.velocity)
+
     def checkPath(self):
         '''
         checks if a beacon is close enough that it is considered passed. If so, the next beacon is the new destination
@@ -100,10 +123,13 @@ class UserCode:
         :param self.path - ordered list of coordinates to follow
         :return None - if the quadrotor is near a coordinate in the list, it is removed:
         '''
+        x = self.state.position
+        x_desired = self.state_desired.position
         distance = lambda x1,x2: sqrt((x1[0]-x2[0])**2 + (x1[1]-x2[1])**2 + (x1[2]-x2[2])**2)
 
-        if distance(self.x,self.path[0])<= self.delta: #if the two points are sufficiently close, they are equal
+        if distance(x,x_desired)<= self.delta: #if the two points are sufficiently close, they are equal
             self.path.pop(0) #removes the first coordinate and the next one is the new destination
+            self.state_desired = State(np.array(self.path[0]))
     
     def traveling_salesman(self):
         '''
@@ -126,6 +152,13 @@ class UserCode:
         print ''
         for beacon in self.path:
             print beacon
+
+
+class State:
+    def __init__(self , position = np.zeros((3,1))):
+        self.position = position
+        self.velocity = np.zeros((3,1))
+
 
 if __name__ == '__main__':
     a = UserCode()
