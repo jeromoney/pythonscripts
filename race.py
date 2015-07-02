@@ -40,7 +40,7 @@ class UserCode:
 
         # 3x3 state covariance matrix
         self.sigma = 0.01 * np.identity(3)
-        
+
     def get_markers(self):
         '''
         place up to 30 markers in the world
@@ -61,15 +61,15 @@ class UserCode:
              [4, 4],
              [5, 5]
         ]
-        
+
         #TODO: Add your markers where needed
-       
+
         return markers
-        
+
     def state_callback(self, t, dt, linear_velocity, yaw_velocity):
         '''
         called when a new odometry measurement arrives approx. 200Hz
-    
+
         :param t - simulation time
         :param dt - time difference this last invocation
         :param linear_velocity - x and y velocity in local quadrotor coordinate frame (independet of roll and pitch)
@@ -82,7 +82,6 @@ class UserCode:
         F = self.calculatePredictStateJacobian(dt, self.x, linear_velocity, yaw_velocity)
         self.sigma = self.predictCovariance(self.sigma, F, self.Q);
         self.velocity = self.velocity_inversion(linear_velocity,yaw_velocity)
-        print [int(x) for x in self.x]
         return self.compute_control_command(),0.
     def velocity_inversion(self,linear_velocity,yaw_velocity):
         '''
@@ -92,8 +91,8 @@ class UserCode:
         :return 3-d velocity in absolute coordinates:
         '''
         rotation = self.rotation(self.x[2])
-        #invRotation = np.linalg.inv(rotation)
-        velocity = np.dot(rotation,linear_velocity)
+        invRotation = np.linalg.inv(rotation)
+        velocity = np.dot(invRotation,linear_velocity)
         velocity = np.concatenate((velocity,np.zeros(1)))
         return velocity
 
@@ -102,7 +101,7 @@ class UserCode:
         '''
         called when a new marker measurement arrives max 30Hz, marker measurements are only available if the quadrotor is
         sufficiently close to a marker
-            
+
         :param marker_position_world - x and y position of the marker in world coordinates 2x1 vector
         :param marker_yaw_world - orientation of the marker in world coordinates
         :param marker_position_relative - x and y position of the marker relative to the quadrotor 2x1 vector
@@ -241,7 +240,7 @@ class UserCode:
             [-c_yaw, -s_yaw, -s_yaw * dx + c_yaw * dy],
             [ s_yaw, -c_yaw, -c_yaw * dx - s_yaw * dy],
             [     0,      0,                      -1]])
-    
+
 
 class Pose2D:
     def __init__(self, rotation, translation):
